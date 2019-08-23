@@ -1,4 +1,4 @@
-FLAGS = -I./deps/linenoise -I./deps/sds
+FLAGS = -I./deps/linenoise -I./deps/sds -m32
 PREFIX?=/usr/local
 MANPREFIX?=${PREFIX}/share/man
 STRIP?=strip
