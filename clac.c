@@ -57,8 +57,8 @@
 #define modulo(A, B) (A - B * floor(A / B))
 
 typedef struct stack {
-	double items[CAPACITY];
 	int top;
+	double items[CAPACITY];
 } stack;
 
 typedef struct node {
@@ -67,12 +67,26 @@ typedef struct node {
 	struct node *next;
 } node;
 
-static stack stacks[] = {{{}, 0}, {{}, 0}};
-static stack *s0 = &stacks[0];
-static stack *s1 = &stacks[1];
-static node *head = NULL;
-static sds result;
-static double hole = 0;
+typedef struct hcamp_context {
+	stack stacks[2];
+	stack *s0;
+	stack *s1;
+	node *head;
+	sds result;
+	double hole;
+} hcamp_context;
+
+typedef hcamp_context* p_context;
+
+p_context mc;
+
+static void init_hcamp_context(p_context context) {
+	context->s0 = &context->stacks[0];
+	context->s1 = &context->stacks[1];
+	context->result = sdsempty();
+	context->head = NULL;
+	context->hole = 0;
+}
 
 static int isoverflow(stack *s) {
 	if (isfull(s)) {
@@ -83,31 +97,103 @@ static int isoverflow(stack *s) {
 	return 0;
 }
 
-static double peek(stack *s) {
-	if (isempty(s)) {
-		return 0;
-	}
+static int count_s0() {
+	return count(mc->s0);
+}
 
+static int count_s1() {
+	return count(mc->s1);
+}
+
+static void clear_s0() {
+	clear(mc->s0);
+}
+
+static void clear_s1() {
+	clear(mc->s1);
+}
+
+static int isfull_s0() {
+	return isfull(mc->s0);
+}
+
+static int isfull_s1() {
+	return isfull(mc->s1);
+}
+
+static int isempty_s0() {
+	return isempty(mc->s0);
+}
+
+static int isempty_s1() {
+	return isempty(mc->s1);
+}
+
+static double __peek(stack *s) {
 	return s->items[s->top-1];
 }
 
-static void push(stack *s, double value) {
-	if (!isoverflow(s)) {
-		s->items[s->top++] = value;
-	}
-}
-
-static double pop(stack *s) {
-	if (isempty(s)) {
+static double peek_s0() {
+	if (isempty(mc->s0)) {
 		return 0;
 	}
+	return __peek(mc->s0);
+}
 
+static double peek_s1() {
+	if (isempty(mc->s1)) {
+		return 0;
+	}
+	return __peek(mc->s1);
+}
+
+static void __push(stack *s, double value) {
+	s->items[s->top++] = value;
+}
+
+static void push_s0(double value) {
+	if (isoverflow(mc->s0)) {
+		return;
+	}
+	return __push(mc->s0, value);
+}
+
+static void push_s1(double value) {
+	if (isoverflow(mc->s1)) {
+		return;
+	}
+	return __push(mc->s1, value);
+}
+
+static double __pop(stack *s) {
 	return s->items[--s->top];
+}
+
+static double pop_s0() {
+	if (isempty(mc->s0)) {
+		return 0;
+	}
+	return __pop(mc->s0);
+}
+
+static double pop_s1() {
+	if (isempty(mc->s1)) {
+		return 0;
+	}
+	return __pop(mc->s1);
+}
+
+static void swap(stack *s) {
+	double a = __pop(s);
+	double b = __pop(s);
+
+	__push(s, a);
+	__push(s, b);
 }
 
 static void move(stack *s, stack *t, int n) {
 	while (!isempty(s) && n > 0) {
-		push(t, pop(s));
+		__push(t, __pop(s));
 		n--;
 	}
 }
@@ -134,27 +220,35 @@ static void roll(stack *s, stack *aux, int m, int n) {
 	double a;
 
 	while (n > 0) {
-		a = pop(s);
+		a = __pop(s);
 		move(s, aux, m);
-		push(s, a);
+		__push(s, a);
 		move(aux, s, m);
 		n--;
 	}
 }
 
-static double add(stack *s, int n) {
-	double a = pop(s);
+static double __add(stack *s, int n) {
+	double a = __pop(s);
 
 	while (!isempty(s) && n > 1) {
-		a += pop(s);
+		a += __pop(s);
 		n--;
 	}
 
 	return a;
 }
 
-static node *get(sds word) {
-	node *curr = head;
+static double add_s0(int n) {
+	return __add(mc->s0, n);
+}
+
+static double add_s1(int n) {
+	return __add(mc->s1, n);
+}
+
+static node *get(p_context pc, sds word) {
+	node *curr = pc->head;
 
 	while (curr != NULL) {
 		if (!strcasecmp(word, curr->word)) {
@@ -167,8 +261,8 @@ static node *get(sds word) {
 	return NULL;
 }
 
-static void set(sds word, sds meaning) {
-	node *curr = get(word);
+static void set(p_context pc, sds word, sds meaning) {
+	node *curr = get(pc, word);
 
 	if (curr != NULL) {
 		fprintf(stderr, "Duplicate definition of \"%s\"\n", word);
@@ -185,16 +279,16 @@ static void set(sds word, sds meaning) {
 
 	curr->word = word;
 	curr->meaning = meaning;
-	curr->next = head;
-	head = curr;
+	curr->next = pc->head;
+	pc->head = curr;
 }
 
-static void cleanup() {
+static void cleanup(p_context pc) {
 	node *curr;
 
-	while (head != NULL) {
-		curr = head;
-		head = curr->next;
+	while (pc->head != NULL) {
+		curr = pc->head;
+		pc->head = curr->next;
 
 		sdsfree(curr->word);
 		sdsfree(curr->meaning);
@@ -203,7 +297,7 @@ static void cleanup() {
 	}
 }
 
-static int parse(sds input) {
+static int parse(p_context pc, sds input) {
 	int argc;
 	sds *argv = sdssplitargs(input, &argc);
 
@@ -218,12 +312,12 @@ static int parse(sds input) {
 		return 1;
 	}
 
-	set(argv[0], argv[1]);
+	set(pc, argv[0], argv[1]);
 
 	return 0;
 }
 
-static void load(sds filename) {
+static void load(p_context pc, sds filename) {
 	FILE *fp;
 
 	if ((fp = fopen(filename, "r")) == NULL) {
@@ -253,7 +347,7 @@ static void load(sds filename) {
 	for (i = 0; i < linecount; i++) {
 		lines[i] = sdstrim(lines[i], " \t\r\n");
 
-		if (parse(lines[i]) != 0) {
+		if (parse(pc, lines[i]) != 0) {
 			sdsfreesplitres(lines, linecount);
 
 			fprintf(stderr, "(%s:%d)\n", filename, i+1);
@@ -265,152 +359,146 @@ static void load(sds filename) {
 	sdsfree(content);
 }
 
-static void eval(const char *input);
+static void eval(p_context pc, const char *input);
 
-static void process(sds word) {
+static void process(p_context pc, sds word) {
 	double a, b;
 	char *z;
 	node *n;
 
 	if (!strcmp(word, "_")) {
-		push(s0, hole);
+		push_s0(pc->hole);
 	} else if (!strcmp(word, "+")) {
-		if (count(s0) > 1) {
-			a = pop(s0);
-			b = pop(s0);
-			push(s0, a + b);
+		if (count_s0() > 1) {
+			a = pop_s0();
+			b = pop_s0();
+			push_s0(a + b);
 		}
 	} else if (!strcmp(word, "-")) {
-		if (count(s0) > 1) {
-			a = pop(s0);
-			b = pop(s0);
-			push(s0, b - a);
+		if (count_s0() > 1) {
+			a = pop_s0();
+			b = pop_s0();
+			push_s0(b - a);
 		}
 	} else if (!strcmp(word, "*")) {
-		if (count(s0) > 1) {
-			a = pop(s0);
-			b = pop(s0);
-			push(s0, b * a);
+		if (count_s0() > 1) {
+			a = pop_s0();
+			b = pop_s0();
+			push_s0(b * a);
 		}
 	} else if (!strcmp(word, "/")) {
-		if (count(s0) > 1) {
-			a = pop(s0);
-			b = pop(s0);
-			push(s0, b / a);
+		if (count_s0() > 1) {
+			a = pop_s0();
+			b = pop_s0();
+			push_s0(b / a);
 		}
 	} else if (!strcmp(word, "%")) {
-		if (count(s0) > 1) {
-			a = pop(s0);
-			b = pop(s0);
-			push(s0, modulo(b, a));
+		if (count_s0() > 1) {
+			a = pop_s0();
+			b = pop_s0();
+			push_s0(modulo(b, a));
 		}
 	} else if (!strcmp(word, "^")) {
-		if (count(s0) > 1) {
-			a = pop(s0);
-			b = pop(s0);
-			push(s0, pow(b, a));
+		if (count_s0() > 1) {
+			a = pop_s0();
+			b = pop_s0();
+			push_s0(pow(b, a));
 		}
 	} else if (!strcasecmp(word, "sum")) {
-		push(s0, add(s0, count(s0)));
+		push_s0(add_s0(count_s0()));
 	} else if (!strcasecmp(word, "add")) {
-		push(s0, add(s0, pop(s0)));
+		push_s0(add_s0(pop_s0()));
 	} else if (!strcasecmp(word, "abs")) {
-		if (count(s0) > 0) {
-			push(s0, fabs(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(fabs(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "ceil")) {
-		if (count(s0) > 0) {
-			push(s0, ceil(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(ceil(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "floor")) {
-		if (count(s0) > 0) {
-			push(s0, floor(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(floor(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "round")) {
-		if (count(s0) > 0) {
-			push(s0, round(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(round(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "sin")) {
-		if (count(s0) > 0) {
-			push(s0, sin(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(sin(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "cos")) {
-		if (count(s0) > 0) {
-			push(s0, cos(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(cos(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "tan")) {
-		if (count(s0) > 0) {
-			push(s0, tan(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(tan(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "ln")) {
-		if (count(s0) > 0) {
-			push(s0, log(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(log(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "log")) {
-		if (count(s0) > 0) {
-			push(s0, log10(pop(s0)));
+		if (count_s0() > 0) {
+			push_s0(log10(pop_s0()));
 		}
 	} else if (!strcasecmp(word, "!")) {
-		if (count(s0) > 0) {
-			a = pop(s0);
+		if (count_s0() > 0) {
+			a = pop_s0();
 
-			push(s0, a * tgamma(a));
+			push_s0(a * tgamma(a));
 		}
 	} else if (!strcasecmp(word, "dup")) {
-		if (!isempty(s0)) {
-			push(s0, peek(s0));
+		if (!isempty_s0()) {
+			push_s0(peek_s0());
 		}
 	} else if (!strcasecmp(word, "roll")) {
-		a = pop(s0);
-		b = pop(s0);
+		a = pop_s0();
+		b = pop_s0();
 
-		roll(s0, s1, b, a);
+		roll(pc->s0, pc->s1, b, a);
 	} else if (!strcasecmp(word, "swap")) {
-		if (count(s0) > 1) {
-			a = pop(s0);
-			b = pop(s0);
-
-			push(s0, a);
-			push(s0, b);
-		}
+		swap(pc->s0);
 	} else if (!strcasecmp(word, "drop")) {
-		pop(s0);
+		pop_s0();
 	} else if (!strcasecmp(word, "count")) {
-		push(s0, (double) count(s0));
+		push_s0((double) count_s0());
 	} else if (!strcasecmp(word, "clear")) {
-		clear(s0);
+		clear_s0();
 	} else if (!strcasecmp(word, "stash")) {
-		move(s0, s1, pop(s0));
+		move(pc->s0, pc->s1, pop_s0());
 	} else if (!strcasecmp(word, "fetch")) {
-		move(s1, s0, pop(s0));
+		move(pc->s1, pc->s0, pop_s0());
 	} else if (!strcasecmp(word, ".")) {
-		move(s0, s1, 1);
+		move(pc->s0, pc->s1, 1);
 	} else if (!strcasecmp(word, ",")) {
-		move(s1, s0, 1);
+		move(pc->s1, pc->s0, 1);
 	} else if (!strcasecmp(word, ":")) {
-		move(s0, s1, count(s0));
+		move(pc->s0, pc->s1, count_s0());
 	} else if (!strcasecmp(word, ";")) {
-		move(s1, s0, count(s1));
- 	} else if ((n = get(word)) != NULL) {
- 		eval(n->meaning);
+		move(pc->s1, pc->s0, count_s1());
+ 	} else if ((n = get(pc, word)) != NULL) {
+ 		eval(pc, n->meaning);
 	} else {
 		a = strtod(word, &z);
 
 		if (*z == '\0') {
-			push(s0, a);
+			push_s0(a);
 		} else if (!isalpha(word[0])) {
-			push(s0, NAN);
+			push_s0(NAN);
 		}
 	}
 }
 
-static void eval(const char *input) {
+static void eval(p_context pc, const char *input) {
 	int i, argc;
 
 	sds *argv = sdssplitargs(input, &argc);
 
 	for (i = 0; i < argc; i++) {
-		process(argv[i]);
+		process(pc, argv[i]);
 	}
 
 	sdsfreesplitres(argv, argc);
@@ -421,36 +509,36 @@ static void completion(const char *input, linenoiseCompletions *lc) {}
 static char *hints(const char *input, int *color, int *bold) {
 	int i;
 
-	clear(s0);
-	clear(s1);
+	clear_s0();
+	clear_s1();
 
-	eval(input);
-	sdsclear(result);
+	eval(mc, input);
+	sdsclear(mc->result);
 
-	result = sdscat(result, " ");
+	mc->result = sdscat(mc->result, " ");
 
-	for (i = 0; i < count(s0); i++) {
-		result = sdscatprintf(result, " %g", s0->items[i]);
+	for (i = 0; i < count_s0(); i++) {
+		mc->result = sdscatprintf(mc->result, " %g", mc->s0->items[i]);
 	}
 
-	if (!isempty(s1)) {
-		result = sdscat(result, " ⋮");
+	if (!isempty_s1()) {
+		mc->result = sdscat(mc->result, " ⋮");
 
-		for (i = s1->top-1; i > -1; i--) {
-			result = sdscatprintf(result, " %g", s1->items[i]);
+		for (i = mc->s1->top-1; i > -1; i--) {
+			mc->result = sdscatprintf(mc->result, " %g", mc->s1->items[i]);
 		}
 	}
 
 	*color = HINT_COLOR;
 
-	return result;
+	return mc->result;
 }
 
 static sds buildpath(const char *fmt, const char *dir) {
 	return sdscatfmt(sdsempty(), fmt, dir, WORDS_FILE);
 }
 
-static void config() {
+static void config(p_context pc) {
 	sds filename = NULL;
 
 	if (getenv("CLAC_WORDS") != NULL) {
@@ -462,23 +550,26 @@ static void config() {
 	}
 
 	if (filename) {
-		load(filename);
+		load(pc, filename);
 		sdsfree(filename);
 	}
 }
 
 int main(int argc, char **argv) {
 	char *line;
+	hcamp_context hc;
+	p_context pc = &hc;
 
-	result = sdsempty();
+	mc = pc;
 
-	config();
+	init_hcamp_context(pc);
+	config(pc);
 
 	if (argc == 2) {
-		eval(argv[1]);
+		eval(pc, argv[1]);
 
-		while (count(s0) > 0) {
-			printf("%g\n", pop(s0));
+		while (count_s0() > 0) {
+			printf("%g\n", pop_s0());
 		}
 
 		exit(0);
@@ -494,28 +585,30 @@ int main(int argc, char **argv) {
 
 	while((line = linenoise("> ")) != NULL) {
 		if (!strcmp(line, "words")) {
-			node *curr = head;
+			node *curr = pc->head;
 
 			while (curr != NULL) {
 				printf(WORDEF_FMT, curr->word, curr->meaning);
 				curr = curr->next;
 			}
 		} else if (!strcmp(line, "reload")) {
-			cleanup();
-			config();
-		} else if (!isempty(s0)) {
-			hole = peek(s0);
-			clear(s0);
-			printf(OUTPUT_FMT, hole);
+			cleanup(pc);
+			config(pc);
+		} else if (!strcmp(line, "exit")) {
+			break;
+		} else if (!isempty_s0()) {
+			pc->hole = peek_s0();
+			clear_s0();
+			printf(OUTPUT_FMT, pc->hole);
 		}
 
-		sdsclear(result);
+		sdsclear(pc->result);
 		linenoiseHistoryAdd(line);
 		free(line);
 	}
 
-	sdsfree(result);
-	cleanup();
+	sdsfree(pc->result);
+	cleanup(pc);
 
 	return 0;
 }
