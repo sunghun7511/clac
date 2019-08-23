@@ -39,7 +39,7 @@
 
 /* UI */  
 #define HINT_COLOR 33
-#define OUTPUT_FMT "\x1b[33m= %g\x1b[0m\n"
+#define OUTPUT_FMT "\x1b[33m= %d\x1b[0m\n"
 #define WORDEF_FMT "%s \x1b[33m\"%s\"\x1b[0m\n"
 
 /* Config */  
@@ -58,7 +58,7 @@
 
 typedef struct stack {
 	int top;
-	double items[CAPACITY];
+	int items[CAPACITY];
 } stack;
 
 typedef struct node {
@@ -73,7 +73,7 @@ typedef struct hcamp_context {
 	stack *s1;
 	node *head;
 	sds result;
-	double hole;
+	int hole;
 } hcamp_context;
 
 typedef hcamp_context* p_context;
@@ -129,54 +129,54 @@ static int isempty_s1() {
 	return isempty(mc->s1);
 }
 
-static double __peek(stack *s) {
+static int __peek(stack *s) {
 	return s->items[s->top-1];
 }
 
-static double peek_s0() {
+static int peek_s0() {
 	if (isempty(mc->s0)) {
 		return 0;
 	}
 	return __peek(mc->s0);
 }
 
-static double peek_s1() {
+static int peek_s1() {
 	if (isempty(mc->s1)) {
 		return 0;
 	}
 	return __peek(mc->s1);
 }
 
-static void __push(stack *s, double value) {
+static void __push(stack *s, int value) {
 	s->items[s->top++] = value;
 }
 
-static void push_s0(double value) {
+static void push_s0(int value) {
 	if (isoverflow(mc->s0)) {
 		return;
 	}
 	return __push(mc->s0, value);
 }
 
-static void push_s1(double value) {
+static void push_s1(int value) {
 	if (isoverflow(mc->s1)) {
 		return;
 	}
 	return __push(mc->s1, value);
 }
 
-static double __pop(stack *s) {
+static int __pop(stack *s) {
 	return s->items[--s->top];
 }
 
-static double pop_s0() {
+static int pop_s0() {
 	if (isempty(mc->s0)) {
 		return 0;
 	}
 	return __pop(mc->s0);
 }
 
-static double pop_s1() {
+static int pop_s1() {
 	if (isempty(mc->s1)) {
 		return 0;
 	}
@@ -184,8 +184,8 @@ static double pop_s1() {
 }
 
 static void swap(stack *s) {
-	double a = __pop(s);
-	double b = __pop(s);
+	int a = __pop(s);
+	int b = __pop(s);
 
 	__push(s, a);
 	__push(s, b);
@@ -217,7 +217,7 @@ static void roll(stack *s, stack *aux, int m, int n) {
 
 	m--;
 
-	double a;
+	int a;
 
 	while (n > 0) {
 		a = __pop(s);
@@ -228,8 +228,8 @@ static void roll(stack *s, stack *aux, int m, int n) {
 	}
 }
 
-static double __add(stack *s, int n) {
-	double a = __pop(s);
+static int __add(stack *s, int n) {
+	int a = __pop(s);
 
 	while (!isempty(s) && n > 1) {
 		a += __pop(s);
@@ -239,11 +239,11 @@ static double __add(stack *s, int n) {
 	return a;
 }
 
-static double add_s0(int n) {
+static int add_s0(int n) {
 	return __add(mc->s0, n);
 }
 
-static double add_s1(int n) {
+static int add_s1(int n) {
 	return __add(mc->s1, n);
 }
 
@@ -362,7 +362,7 @@ static void load(p_context pc, sds filename) {
 static void eval(p_context pc, const char *input);
 
 static void process(p_context pc, sds word) {
-	double a, b;
+	int a, b;
 	char *z;
 	node *n;
 
@@ -464,7 +464,7 @@ static void process(p_context pc, sds word) {
 	} else if (!strcasecmp(word, "drop")) {
 		pop_s0();
 	} else if (!strcasecmp(word, "count")) {
-		push_s0((double) count_s0());
+		push_s0(count_s0());
 	} else if (!strcasecmp(word, "clear")) {
 		clear_s0();
 	} else if (!strcasecmp(word, "stash")) {
@@ -504,36 +504,6 @@ static void eval(p_context pc, const char *input) {
 	sdsfreesplitres(argv, argc);
 }
 
-static void completion(const char *input, linenoiseCompletions *lc) {}
-
-static char *hints(const char *input, int *color, int *bold) {
-	int i;
-
-	clear_s0();
-	clear_s1();
-
-	eval(mc, input);
-	sdsclear(mc->result);
-
-	mc->result = sdscat(mc->result, " ");
-
-	for (i = 0; i < count_s0(); i++) {
-		mc->result = sdscatprintf(mc->result, " %g", mc->s0->items[i]);
-	}
-
-	if (!isempty_s1()) {
-		mc->result = sdscat(mc->result, " ⋮");
-
-		for (i = mc->s1->top-1; i > -1; i--) {
-			mc->result = sdscatprintf(mc->result, " %g", mc->s1->items[i]);
-		}
-	}
-
-	*color = HINT_COLOR;
-
-	return mc->result;
-}
-
 static sds buildpath(const char *fmt, const char *dir) {
 	return sdscatfmt(sdsempty(), fmt, dir, WORDS_FILE);
 }
@@ -560,6 +530,10 @@ int main(int argc, char **argv) {
 	hcamp_context hc;
 	p_context pc = &hc;
 
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    setvbuf(stdin, NULL, _IONBF, 0);
+
 	mc = pc;
 
 	init_hcamp_context(pc);
@@ -569,7 +543,7 @@ int main(int argc, char **argv) {
 		eval(pc, argv[1]);
 
 		while (count_s0() > 0) {
-			printf("%g\n", pop_s0());
+			printf("%d\n", pop_s0());
 		}
 
 		exit(0);
@@ -579,9 +553,6 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "usage: clac [expression]\n");
 		exit(1);
 	}
-
-	linenoiseSetHintsCallback(hints);
-	linenoiseSetCompletionCallback(completion);
 
 	while((line = linenoise("> ")) != NULL) {
 		if (!strcmp(line, "words")) {
@@ -596,14 +567,20 @@ int main(int argc, char **argv) {
 			config(pc);
 		} else if (!strcmp(line, "exit")) {
 			break;
-		} else if (!isempty_s0()) {
-			pc->hole = peek_s0();
+		} else {
 			clear_s0();
-			printf(OUTPUT_FMT, pc->hole);
+			clear_s1();
+
+			eval(pc, line);
+
+			if (!isempty_s0()) {
+				pc->hole = peek_s0();
+				clear_s0();
+				printf(OUTPUT_FMT, pc->hole);
+			}
 		}
 
 		sdsclear(pc->result);
-		linenoiseHistoryAdd(line);
 		free(line);
 	}
 
