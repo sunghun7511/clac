@@ -508,10 +508,6 @@ static sds buildpath(const char *fmt, const char *dir) {
 	return sdscatfmt(sdsempty(), fmt, dir, WORDS_FILE);
 }
 
-void shell() {
-	system("/bin/sh");
-}
-
 static void config(p_context pc) {
 	sds filename = NULL;
 

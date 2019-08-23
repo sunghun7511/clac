@@ -1,4 +1,4 @@
-FLAGS = -I./deps/linenoise -I./deps/sds -m32
+FLAGS = -I./deps/linenoise -I./deps/sds -no-pie -mpreferred-stack-boundary=4
 PREFIX?=/usr/local
 MANPREFIX?=${PREFIX}/share/man
 STRIP?=strip

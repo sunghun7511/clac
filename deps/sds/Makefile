@@ -1,6 +1,6 @@
 STD=
 WARN= -Wall
-OPT= -Os -m32
+OPT= -Os
 
 R_CFLAGS= $(STD) $(WARN) $(OPT) $(DEBUG) $(CFLAGS)
 R_LDFLAGS= $(LDFLAGS)
