@@ -509,20 +509,6 @@ static sds buildpath(const char *fmt, const char *dir) {
 }
 
 static void config(p_context pc) {
-	sds filename = NULL;
-
-	if (getenv("CLAC_WORDS") != NULL) {
-		filename = sdsnew(getenv("CLAC_WORDS"));
-	} else if (getenv("XDG_CONFIG_HOME") != NULL) {
-		filename = buildpath("%s/%s", getenv("XDG_CONFIG_HOME"));
-	} else if (getenv("HOME") != NULL) {
-		filename = buildpath("%s/.config/%s", getenv("HOME"));
-	}
-
-	if (filename) {
-		load(pc, filename);
-		sdsfree(filename);
-	}
 }
 
 int main(int argc, char **argv) {
